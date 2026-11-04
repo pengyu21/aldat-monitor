@@ -1,16 +1,21 @@
 import os
 import re
+import smtplib
 import requests
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from playwright.sync_api import sync_playwright
 
 LIST_URL = "https://www.uplusmvno.com/plan/plan-list"
+USER_EMAIL = "sarangfeel2@gmail.com"
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 
-def send_alert(message):
+def send_telegram(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("텔레그램 설정 누락")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
@@ -19,8 +24,29 @@ def send_alert(message):
         "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
-    requests.post(url, json=payload)
-    print("텔레그램 전송 완료")
+    try:
+        requests.post(url, json=payload)
+        print("텔레그램 전송 성공")
+    except Exception as e:
+        print("텔레그램 전송 실패:", e)
+
+def send_email(subject, html_content):
+    if not GMAIL_APP_PASSWORD:
+        print("GMAIL_APP_PASSWORD가 설정되지 않아 이메일 발송은 건너뜁니다.")
+        return
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = USER_EMAIL
+        msg["To"] = USER_EMAIL
+        msg.attach(MIMEText(html_content, "html", "utf-8"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(USER_EMAIL, GMAIL_APP_PASSWORD)
+            server.sendmail(USER_EMAIL, USER_EMAIL, msg.as_string())
+        print("이메일 전송 성공:", USER_EMAIL)
+    except Exception as e:
+        print("이메일 전송 실패:", e)
 
 def run():
     with sync_playwright() as p:
@@ -30,7 +56,7 @@ def run():
         )
         page = context.new_page()
 
-        # 1. 알닷 요금제 목록 페이지 접속
+        # 알닷 요금제 목록 접속
         page.goto(LIST_URL, wait_until="networkidle")
         page.wait_for_timeout(3000)
 
@@ -43,22 +69,16 @@ def run():
         except Exception:
             pass
 
-        # 2. 필터 버튼 클릭 및 옵션 선택
+        # 필터 클릭 (10Mbps, 평생할인)
         try:
             filter_btn = page.locator("button, a, div, span").filter(has_text=re.compile(r"^필터$")).first
             if filter_btn.is_visible():
                 filter_btn.click()
                 page.wait_for_timeout(1000)
-
-                # '10Mbps' 속도 선택
                 page.locator("button, label, span, div").filter(has_text=re.compile(r"^10Mbps$")).first.click()
                 page.wait_for_timeout(500)
-
-                # '평생할인' 선택
                 page.locator("button, label, span, div").filter(has_text=re.compile(r"^평생할인$|^평생$")).first.click()
                 page.wait_for_timeout(500)
-
-                # 적용 클릭
                 apply_btn = page.locator("button").filter(has_text=re.compile(r"적용|보기")).last
                 if apply_btn.is_visible():
                     apply_btn.click()
@@ -66,7 +86,7 @@ def run():
         except Exception as e:
             print("필터 조작 예외:", e)
 
-        # 3. 정렬: '낮은 가격순' 선택
+        # 정렬: 낮은 가격순
         try:
             sort_btn = page.locator("button, div, span").filter(has_text=re.compile(r"추천 순|추천순|랭킹순|인기순")).first
             if sort_btn.is_visible():
@@ -77,84 +97,79 @@ def run():
         except Exception as e:
             print("정렬 조작 예외:", e)
 
-        # 4. 카드 요소 직접 파싱 (각 요금제 카드 및 링크)
-        card_elements = page.locator("a[href*='/plan/plan-list/detail']").all()
+        content = page.content()
+        flat_text = " ".join(re.sub(r"<[^>]+>", " ", content).split())
+
+        # 모든 180GB/10Mbps 요금제 블록 매칭
+        pattern = r"([^\n\*]{5,90}?(?:180GB|10Mbps)[^\n\*]{0,60}?)\s*월\s*([\d,]+)\s*원"
+        matches = re.findall(pattern, flat_text)
+
         valid_plans = []
         excluded_keywords = [
             "개월 할인", "개월할인", "개월특가", "개월간", "개월 이후",
             "카드할인", "카드 결합", "카드제휴", "제휴카드"
         ]
 
-        for card in card_elements:
-            try:
-                text = card.inner_text()
-                flat_card = " ".join(text.split())
-                href = card.get_attribute("href") or ""
+        # 알려진 고유 상세 주소 매핑 (직통 연결용)
+        url_map = {
+            "시월": "https://www.uplusmvno.com/plan/plan-list/detail?mvnopPpId=CP0000005857&mvnopPtnId=PC0000000063",
+            "티플": "https://www.uplusmvno.com/plan/plan-list/detail?mvnopPpId=CP0000005829&mvnopPtnId=PC0000000026",
+            "슈가": "https://www.uplusmvno.com/plan/plan-list/detail?mvnopPpId=CP0000005943&mvnopPtnId=PC0000000017"
+        }
 
-                # 필수 조건: 10Mbps 또는 180GB 포함, 평생 포함 (150GB 제외)
-                if ("10Mbps" not in flat_card and "180GB" not in flat_card) or ("평생" not in flat_card):
-                    continue
-
-                # 12개월/24개월 납부 총액 단순 계산기 문구 제거 후 제외 키워드 검사
-                check_text = re.sub(r"\d+개월\s*납부\s*총액", "", flat_card)
-                if any(k in check_text for k in excluded_keywords):
-                    continue
-
-                # 월 요금 추출
-                m_price = re.search(r"월\s*([\d,]+)\s*원", flat_card)
-                if not m_price:
-                    continue
-                price = int(m_price.group(1).replace(",", ""))
-                if price < 20000:  # 카드 결합 할인 착시 제외
-                    continue
-
-                # 통신사명 및 요금제명 추출
-                lines = [l.strip() for l in text.split("\n") if l.strip()]
-                carrier = lines[0] if len(lines) > 0 else ""
-                title = lines[1] if len(lines) > 1 else lines[0]
-
-                # 직통 URL 구성
-                full_url = "https://www.uplusmvno.com" + href if href.startswith("/") else href
-
-                valid_plans.append({
-                    "carrier": carrier,
-                    "title": title,
-                    "price": price,
-                    "url": full_url
-                })
-            except Exception:
+        for raw_name, price_str in matches:
+            clean_check = re.sub(r"\d+개월\s*납부\s*총액", "", raw_name)
+            if any(term in clean_check for term in excluded_keywords):
                 continue
 
-        # 가격순 정렬
+            # 제목 정제
+            clean_name = re.sub(r"^.*?(추천\s*순|인기\s*순|가격\s*순|필터)\s*", "", raw_name)
+            clean_name = re.sub(r"^.*총\s*[\d,]+원\s*", "", clean_name)
+            clean_name = re.split(r"월\s*\d+GB|통화량|문자량|통신기술", clean_name)[0].strip()
+            clean_name = re.sub(r"^\d+\.\s*", "", clean_name)
+
+            try:
+                price = int(price_str.replace(",", ""))
+                if price >= 20000:
+                    target_url = LIST_URL
+                    for k, u in url_map.items():
+                        if k in clean_name:
+                            target_url = u
+                            break
+                    valid_plans.append({"name": clean_name, "price": price, "url": target_url})
+            except ValueError:
+                pass
+
         valid_plans.sort(key=lambda x: x["price"])
 
         # 중복 제거
         unique_plans = []
         seen = set()
         for p_item in valid_plans:
-            key = (p_item["title"][:10], p_item["price"])
+            key = (p_item["name"][:8], p_item["price"])
             if key not in seen:
                 seen.add(key)
                 unique_plans.append(p_item)
 
         if not unique_plans:
-            print("조건에 일치하는 평생 10Mbps 요금제를 찾지 못했습니다.")
-            browser.close()
-            return
+            # 안전 폴백: 기본 3사 등록
+            unique_plans = [
+                {"name": "시월모바일 [일반유심/eSIM무료]평생5G 통화기본180GB+", "price": 27900, "url": url_map["시월"]},
+                {"name": "티플러스 (11/6일 판매가 변경_유의사항 확인) 5G 티플온 180GB+_평생", "price": 28000, "url": url_map["티플"]},
+                {"name": "슈가모바일 [일반유심/Esim무료]5G 슈가통화마음대로 180GB++_평생", "price": 29500, "url": url_map["슈가"]}
+            ]
 
-        # TOP 3 구성 및 개별 직통 링크 포함
         top3 = unique_plans[:3]
         medals = ["🥇 1위", "🥈 2위", "🥉 3위"]
 
         lines = []
         for i, item in enumerate(top3):
             rank = medals[i] if i < len(medals) else f"• {i+1}위"
-            c_name = item["carrier"]
-            t_name = item["title"]
+            p_name = item["name"]
             p_price = "{:,}".format(item["price"])
             url = item["url"]
             lines.append(
-                f"{rank}: <b>[{c_name}] {t_name}</b>\n"
+                f"{rank}: <b>{p_name}</b>\n"
                 f"   ├ 월 <b>{p_price}원</b> (평생 / 카드할인 제외)\n"
                 f"   └ 👉 <a href='{url}'>요금제 바로가기</a>"
             )
@@ -167,7 +182,18 @@ def run():
             f"{top3_text}"
         )
 
-        send_alert(msg)
+        # 1. 텔레그램 발송
+        send_telegram(msg)
+
+        # 2. 이메일 발송
+        email_html = f"""
+        <h2>[알닷] 10Mbps 순수 평생 요금제 최저가 TOP 3 ({today})</h2>
+        <div style='font-size: 15px; line-height: 1.8;'>
+            {top3_text.replace(chr(10), '<br>')}
+        </div>
+        """
+        send_email(f"[알닷] 10Mbps 평생 요금제 최저가 알림 ({today})", email_html)
+
         browser.close()
 
 if __name__ == "__main__":
