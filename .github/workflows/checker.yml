@@ -1,0 +1,29 @@
+name: Aldat Price Monitor
+
+on:
+  schedule:
+    # 매일 한국 시간 오전 9:00 (UTC 00:00) 자동 실행
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 수동 즉시 실행 지원
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 브라우저 및 패키지 설치
+        run: |
+          pip install playwright requests
+          playwright install chromium --with-deps
+
+      - name: 요금제 검사 실행
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
