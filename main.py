@@ -89,42 +89,44 @@ def run():
             matches = re.findall(pattern2, flat_text)
 
         valid_plans = []
-        for name, price_str in matches:
-            # 기간 한정 할인(7/12/24개월) 및 카드 결합 관련 요금제 배제
-            excluded_keywords = [
-                "7개월", "12개월", "24개월", "개월 할인", "개월특가", "개월간",
-                "카드할인", "카드 결합", "카드제휴", "제휴카드"
-            ]
-            if any(term in name for term in excluded_keywords):
+        excluded_keywords = [
+            "개월 할인", "개월할인", "개월특가", "개월간", "개월 이후",
+            "카드할인", "카드 결합", "카드제휴", "제휴카드"
+        ]
+
+        for raw_name, price_str in matches:
+            # '12개월 납부 총액', '24개월 납부 총액' 단순 계산기 문구 임시 제거 후 검사
+            clean_check = re.sub(r"\d+개월\s*납부\s*총액", "", raw_name)
+
+            # 진짜 기간 한정 할인 요금제 및 카드 결합 요금제 배제
+            if any(term in clean_check for term in excluded_keywords):
                 continue
 
-            clean_name = (
-                name.replace("현재 보고 있는 요금제", "")
-                .replace("이 요금제가 좋은 이유", "")
-                .replace("데이터 소진 시 유튜브 화질 1080p로 원활히 볼 수 있어요.", "")
-                .strip()
-            )
+            # 요금제 이름 깔끔하게 정제 (부가 설명 문구 분리)
+            clean_name = re.split(r"월\s*\d+GB|통화량|문자량|통신기술", raw_name)[0].strip()
+
             try:
                 price = int(price_str.replace(",", ""))
-                # 제휴카드 할인 착시(0원~몇천원) 및 부가서비스 제외: 순수 통신료 20,000원 이상만 인정
+                # 카드 할인 거품(몇천 원대) 및 부가서비스 제외: 순수 통신료 20,000원 이상만 수집
                 if price >= 20000:
                     valid_plans.append({"name": clean_name, "price": price})
             except ValueError:
                 pass
 
+        # 가격 오름차순 정렬
         valid_plans.sort(key=lambda x: x["price"])
 
         # 중복 제거
         unique_plans = []
         seen = set()
         for p_item in valid_plans:
-            key = (p_item["name"][:12], p_item["price"])
+            key = (p_item["name"][:10], p_item["price"])
             if key not in seen:
                 seen.add(key)
                 unique_plans.append(p_item)
 
         if not unique_plans:
-            print("조건에 일치하는 순수 평생 10Mbps 요금제를 찾지 못했습니다.")
+            print("조건에 일치하는 평생 10Mbps 요금제를 찾지 못했습니다.")
             browser.close()
             return
 
