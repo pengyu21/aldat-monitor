@@ -3,7 +3,7 @@ import re
 import requests
 from playwright.sync_api import sync_playwright
 
-# 감시할 요금제 상세 페이지 (티플러스 180GB+10Mbps 평생 요금제)
+# 감시할 요금제 상세 페이지 (티플러스 5G 180GB+10Mbps 평생)
 TARGET_URL = "https://www.uplusmvno.com/plan/plan-list/detail?mvnopPpId=CP0000005829&mvnopPtnId=PC0000000026"
 BASE_PRICE = 28000  # 현재 기준 최저가 (28,000원)
 
@@ -30,28 +30,33 @@ def run():
         page.goto(TARGET_URL, wait_until="networkidle")
         page.wait_for_timeout(3000)
 
-        # 페이지 텍스트에서 '월 xx,xxx원' 추출
+        # 페이지 텍스트 가져오기 (공백 단일화)
         content = page.content()
-        matches = re.findall(r"월\s*([\d,]+)\s*원", content)
+        flat_text = " ".join(re.sub(r"<[^>]+>", " ", content).split())
+
+        # 오직 '180GB' 요금제와 바로 붙어 있는 월 요금만 정확히 추출 (부가서비스 6,600원 등 제외)
+        matches = re.findall(r"180GB.{0,60}?월\s*([\d,]+)\s*원", flat_text)
 
         prices = []
         for m in matches:
             try:
                 val = int(m.replace(",", ""))
-                if 5000 <= val <= 100000:
+                # 정상적인 180GB 요금제 가격대(1만원 이상)만 수집
+                if val >= 10000:
                     prices.append(val)
             except ValueError:
                 pass
 
         if not prices:
-            print("가격 데이터를 가져오지 못했습니다.")
+            print("180GB 요금제 가격을 찾지 못했습니다.")
             browser.close()
             return
 
         current_lowest = min(prices)
-        print(f"현재 가격: {current_lowest}원 (기준 최저가: {BASE_PRICE}원)")
+        print(f"인식된 180GB 요금제 목록: {prices}")
+        print(f"현재 최저가: {current_lowest:,}원 (기준 최저가: {BASE_PRICE:,}원)")
 
-        # 28,000원 미만으로 가격이 떨어졌을 때 알림 발생
+        # 현재 최저가인 28,000원 '미만'으로 떨어졌을 때만 텔레그램 발송!
         if current_lowest < BASE_PRICE:
             msg = (
                 f"🚨 <b>[알닷] 180GB+10Mbps 평생 요금제 최저가 갱신!</b>\n\n"
@@ -60,7 +65,7 @@ def run():
             )
             send_alert(msg)
         else:
-            print("현재 최저가 유지 중입니다.")
+            print(f"현재 최저가({current_lowest:,}원) 유지 중이므로 알림을 보내지 않습니다.")
 
         browser.close()
 
