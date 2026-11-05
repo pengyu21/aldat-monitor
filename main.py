@@ -32,6 +32,7 @@ def send_telegram(message):
 
 def send_email(subject, html_content):
     if not GMAIL_APP_PASSWORD:
+        print("GMAIL_APP_PASSWORD가 없어 이메일 발송을 건너뜁니다.")
         return
     try:
         msg = MIMEMultipart("alternative")
@@ -43,7 +44,7 @@ def send_email(subject, html_content):
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(USER_EMAIL, GMAIL_APP_PASSWORD)
             server.sendmail(USER_EMAIL, USER_EMAIL, msg.as_string())
-        print("이메일 전송 성공")
+        print("이메일 전송 성공:", USER_EMAIL)
     except Exception as e:
         print("이메일 전송 실패:", e)
 
@@ -55,7 +56,7 @@ def run():
         )
         page = context.new_page()
 
-        # 알닷 요금제 목록 페이지 접속
+        # 알닷 요금제 목록 접속
         page.goto(LIST_URL, wait_until="networkidle")
         page.wait_for_timeout(3000)
 
@@ -85,7 +86,6 @@ def run():
             {"carrier": "시월모바일", "title": "평생5G 통화기본 125GB+", "keywords": ["시월", "통화기본125GB", "통화기본 125GB"], "default_price": 26950}
         ]
 
-        # 실시간 가격 매칭 함수
         def resolve_prices(target_list, min_price, max_price):
             resolved = []
             for t in target_list:
@@ -106,7 +106,7 @@ def run():
 
         medals = ["🥇 1위", "🥈 2위", "🥉 3위"]
 
-        # 10Mbps 텍스트 구성
+        # 10Mbps 리스트 구성
         lines_10 = []
         for i, item in enumerate(list_10):
             rank = medals[i]
@@ -115,7 +115,7 @@ def run():
             p_price = "{:,}".format(item["price"])
             lines_10.append(f"{rank}: <b>[{c}] {t}</b>\n   └ 월 <b>{p_price}원</b> (평생)")
 
-        # 5Mbps 텍스트 구성
+        # 5Mbps 리스트 구성
         lines_5 = []
         for i, item in enumerate(list_5):
             rank = medals[i]
@@ -138,7 +138,24 @@ def run():
             f"🔗 <a href='{LIST_URL}'>알닷 요금제 목록 바로가기</a>"
         )
 
+        # 1. 텔레그램 발송
         send_telegram(msg)
+
+        # 2. 이메일 발송 (sarangfeel2@gmail.com)
+        email_html = f"""
+        <h2>[알닷] 5G 평생 요금제 속도별 최저가 TOP 3 ({today})</h2>
+        <div style='font-size: 15px; line-height: 1.8;'>
+            <h3 style='color: #e6007e;'>🚀 [10Mbps 무제한]</h3>
+            {top10_text.replace(chr(10), '<br>')}
+            <br><hr style='border: 1px dashed #ccc;'><br>
+            <h3 style='color: #0070f3;'>⚡ [5Mbps 무제한]</h3>
+            {top5_text.replace(chr(10), '<br>')}
+            <br><br>
+            <a href='{LIST_URL}' style='padding: 10px 16px; background-color: #e6007e; color: white; text-decoration: none; border-radius: 4px; display: inline-block;'>알닷 요금제 목록 바로가기</a>
+        </div>
+        """
+        send_email(f"[알닷] 5G 평생 요금제 속도별 최저가 알림 ({today})", email_html)
+
         browser.close()
 
 if __name__ == "__main__":
