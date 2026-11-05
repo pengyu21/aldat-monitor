@@ -2,8 +2,10 @@ name: Aldat Price Monitor
 
 on:
   schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
+    # 한국 시간 기준 매일 오전 8:05 (UTC 23:05) & 오후 4:05 (UTC 07:05) 하루 2회 실행
+    # (정각 트래픽 병목을 피해 정시 실행을 보장하기 위해 5분으로 설정)
+    - cron: '5 23,7 * * *'
+  workflow_dispatch: # 수동 즉시 실행 버튼 유지
 
 jobs:
   check:
