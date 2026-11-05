@@ -2,10 +2,10 @@ name: Aldat Price Monitor
 
 on:
   schedule:
-    # 한국 시간 기준 매일 오전 8:05 (UTC 23:05) & 오후 4:05 (UTC 07:05) 하루 2회 실행
-    # (정각 트래픽 병목을 피해 정시 실행을 보장하기 위해 5분으로 설정)
-    - cron: '5 23,7 * * *'
-  workflow_dispatch: # 수동 즉시 실행 버튼 유지
+    # 깃허브 공식 규격: 시간 쉼표 대신 스케줄을 각각 1줄씩 분리
+    - cron: '10 23 * * *'  # 매일 오전 8시 10분 KST (UTC 23:10)
+    - cron: '10 7 * * *'   # 매일 오후 4시 10분 KST (UTC 07:10)
+  workflow_dispatch:
 
 jobs:
   check:
